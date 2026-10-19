@@ -1,0 +1,12 @@
+.env
+backend/.env
+frontend/.env
+frontend/.env.*
+!.env.example
+!frontend/.env.example
+backend/vendor/
+frontend/node_modules/
+frontend/dist/
+.idea/
+.vscode/
+.DS_Store
