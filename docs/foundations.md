@@ -51,6 +51,8 @@ One line per locked decision. This is the first thing every command reads.
 | 25 | Nginx configs | `docker/nginx/dev.conf` + `prod.conf`; new routes go in both | A |
 | 26 | Env files | Root `.env` (compose), `backend/.env`, `frontend/.env` (`VITE_*` only); `.env.example` for each is committed | C |
 | 27 | Test database | `docrag_test`, created by `docker/db/init/` | C |
+| 28 | Auth (M1) | `laravel/sanctum ^4`, stateful SPA cookie mode, no API tokens; CSRF cookie at `/api/sanctum/csrf-cookie` | B |
+| 29 | Roles (M1) | Built-in gates/policies + `users.role` (`admin` \| `employee`); admin-created accounts, no mail in M1 | B |
 
 ---
 
@@ -251,6 +253,40 @@ Each capability is one block and follows the rules in §5.2, §6.2 and §7.2. If
 
 Common capabilities: admin panel, realtime / live chat, auth, queue and jobs, cache, search, file storage, mail, payments, observability and logging, scheduler, API docs, mobile client, AI / LLM / vector store, i18n.
 
+### Capability: Authentication (SPA session)
+
+| Item | Value |
+|------|-------|
+| Needed by | M1 Team access ("nothing is reachable without login") |
+| Library / service | `laravel/sanctum`, stateful SPA (cookie) mode only. API tokens are not used. [LOCKED] |
+| Version | `^4` (4.3.x supports Laravel 12 and PHP 8.4; exact version resolved by Composer at install) [LOCKED] |
+| Why this one | Owner's choice. First-party; its stateful middleware gives session cookies plus CSRF protection for a same-origin SPA, which matches §7.1 exactly |
+| Alternatives considered | Sanctum + Fortify (ready-made login, reset and 2FA endpoints; more than M1 needs, and registration would have to be disabled); plain session guard without a package (re-implements what Sanctum's stateful middleware does) |
+| Status | [LOCKED] |
+| Impacts: Dockerfile | None |
+| Impacts: compose | None |
+| Impacts: network | None. Sanctum's CSRF cookie route moves under `/api` (`sanctum.prefix = api/sanctum`, so `GET /api/sanctum/csrf-cookie`), and the login, logout and current-user endpoints live under `/api`. The existing `/api/` location in `dev.conf` and `prod.conf` covers all of them, so nginx needs no new route. [LOCKED] |
+| Impacts: repo tree | `backend/config/sanctum.php` (published). Installed with `composer require laravel/sanctum` plus config publish, **not** `php artisan install:api` (§0 row 23; `routes/api.php` already exists). The `personal_access_tokens` migration is not published because tokens are unused. [LOCKED] |
+| Config / env vars | `backend/.env`: `SANCTUM_STATEFUL_DOMAINS=localhost:8080` (prod: the production host, §12 #4); `SESSION_DRIVER=database` (already set); `SESSION_DOMAIN=null` (host-only cookie, §7.1); `SESSION_SAME_SITE=lax`; `SESSION_SECURE_COOKIE=false` locally, `true` in prod. `bootstrap/app.php` enables `$middleware->statefulApi()`. [LOCKED] |
+| Constraints | Same origin only (§7.1); no CORS. The SPA calls `/api/sanctum/csrf-cookie` before login and sends `X-XSRF-TOKEN` on state-changing requests (automatic with axios; with `fetch` the SPA reads the `XSRF-TOKEN` cookie itself). No public registration endpoint. Login is rate-limited with Laravel's built-in rate limiter. Every `/api` route except login and the CSRF cookie requires `auth:sanctum`. [LOCKED] |
+
+### Capability: Authorization (roles)
+
+| Item | Value |
+|------|-------|
+| Needed by | M1 Team access (admins and employees; "admins manage users") |
+| Library / service | None. Laravel's built-in gates and policies, plus a `role` column on `users` (`admin` \| `employee`) [LOCKED] |
+| Version | Ships with `laravel/framework ^12` |
+| Why this one | Owner's choice. Two fixed roles don't justify a permissions library |
+| Alternatives considered | `spatie/laravel-permission` (roles and permissions tables; revisit if the PRD's open question on per-document permissions is answered "yes") |
+| Status | [LOCKED] |
+| Impacts: Dockerfile | None |
+| Impacts: compose | None |
+| Impacts: network | None |
+| Impacts: repo tree | None beyond Laravel defaults (`app/Policies/`, a migration for `users.role`) |
+| Config / env vars | None |
+| Constraints | Accounts are created only by admins, who set a temporary password the user changes after first login. Admins reset forgotten passwords. **No mail capability in M1** (owner's choice). The first admin is bootstrapped from the CLI (`docker compose exec app …`), never through a public endpoint. Roles are enforced on the backend; the SPA only hides UI. [LOCKED] |
+
 ---
 
 # PART C: Cross-cutting (core, decided before the PRD)
@@ -300,6 +336,7 @@ Anything still [OPEN]. Commands must ask about these before relying on them.
 |------|--------|--------|
 | 2026-10-19 | Core drafted (Part A, Part C, §14) | `/plan-foundations` core interview |
 | 2026-10-19 | Core approved; all proposed defaults locked | Owner approval |
+| 2026-10-19 | Part B: Authentication (Sanctum SPA) and Authorization (built-in roles) for M1; all items locked | `/plan-foundations --capabilities M1`, owner approval |
 
 ## 14. Scaffold acceptance (F000)
 
